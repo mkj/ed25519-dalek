@@ -397,6 +397,15 @@ impl ExpandedSecretKey {
     /// Sign a message with this `ExpandedSecretKey`.
     #[allow(non_snake_case)]
     pub fn sign(&self, message: &[u8], public_key: &PublicKey) -> ed25519::Signature {
+        self.sign_parts(|h| Ok(h.update(message)), public_key).unwrap()
+    }
+
+    /// Sign a message provided in parts. The `msg_update` closure
+    /// will be called twice to hash the message parts.
+    #[allow(non_snake_case)]
+    pub fn sign_parts<F>(&self, msg_update: F, public_key: &PublicKey)
+        -> Result<ed25519::Signature, SignatureError>
+            where F: Fn(&mut Sha512) -> Result<(), SignatureError> {
         let mut h: Sha512 = Sha512::new();
         let R: CompressedEdwardsY;
         let r: Scalar;
@@ -404,7 +413,7 @@ impl ExpandedSecretKey {
         let k: Scalar;
 
         h.update(&self.nonce);
-        h.update(&message);
+        msg_update(&mut h)?;
 
         r = Scalar::from_hash(h);
         R = (&r * &constants::ED25519_BASEPOINT_TABLE).compress();
@@ -412,12 +421,12 @@ impl ExpandedSecretKey {
         h = Sha512::new();
         h.update(R.as_bytes());
         h.update(public_key.as_bytes());
-        h.update(&message);
+        msg_update(&mut h)?;
 
         k = Scalar::from_hash(h);
         s = &(&k * &self.key) + &r;
 
-        InternalSignature { R, s }.into()
+        Ok(InternalSignature { R, s }.into())
     }
 
     /// Sign a `prehashed_message` with this `ExpandedSecretKey` using the
